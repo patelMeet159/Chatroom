@@ -1,43 +1,102 @@
-//Name = Meet Patel
-
+import java.awt.event.ActionEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Scanner;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
+/**
+ * Chatroom
+ *
+ * Purpose:
+ * - GUI chat client
+ * - Authenticates against AuthenticationServer
+ * - Registers with DatabaseServer
+ * - Opens a local listening socket for incoming messages
+ * - Displays sent and received messages in the text area
+ *
+ * GUI fields:
+ * - Username
+ * - Password
+ * - Server IP / Host
+ * - Listen Port
+ *
+ * Notes:
+ * - The Server IP / Host is the machine running AuthenticationServer and DatabaseServer
+ * - The Listen Port is the local port THIS client listens on for incoming messages
+ */
 public class Chatroom extends javax.swing.JFrame {
 
     private static final java.util.logging.Logger logger =
             java.util.logging.Logger.getLogger(Chatroom.class.getName());
 
+    // Authentication state
     private boolean auth = false;
+
+    // Current logged-in user
     private Person currentUser;
+
+    // Current selected receiver from the combo box
     private Person selectedReceiver;
+
+    // Server host entered by the user
+    private String serverHost;
+
+    // Listening socket for incoming chat messages
     private ServerSocket listenerSocket;
+
+    // Background thread that accepts incoming messages
     private Thread listenerThread;
+
+    // Formatter for timestamps shown in the chat area
+    private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     public Chatroom() {
         initComponents();
+
+        // Prevent user from directly typing into the chat transcript area
         jTextArea1.setEditable(false);
+
+        // Start with empty outgoing message box
         txt_msg.setText("");
-        txt_ipAdd.setText("localhost");
+
+        // Default server host for same-machine testing
+        txt_serverHost.setText("localhost");
+
+        // Pressing Enter in the message field sends the message
+        txt_msg.addActionListener(this::btn_sendActionPerformed);
+
+        // Attempt graceful logout when the window is closed
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                cleanupAndLogout();
+            }
+        });
     }
 
+    /**
+     * Builds the Swing GUI.
+     */
     private void initComponents() {
 
         lbl_usrName = new javax.swing.JLabel();
         txt_usrName = new javax.swing.JTextField();
         lbl_pass = new javax.swing.JLabel();
         txt_pass = new javax.swing.JTextField();
-        lbl_ipAdd = new javax.swing.JLabel();
-        txt_ipAdd = new javax.swing.JTextField();
+        lbl_serverHost = new javax.swing.JLabel();
+        txt_serverHost = new javax.swing.JTextField();
         lbl_port = new javax.swing.JLabel();
         txt_port = new javax.swing.JTextField();
         btn_login = new javax.swing.JButton();
+        btn_logout = new javax.swing.JButton();
         jSeparator1 = new javax.swing.JSeparator();
         lbl_to = new javax.swing.JLabel();
         jComboBox1 = new javax.swing.JComboBox<>();
@@ -48,14 +107,18 @@ public class Chatroom extends javax.swing.JFrame {
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setResizable(false);
+        setTitle("Chatroom");
 
         lbl_usrName.setText("User name");
         lbl_pass.setText("Password");
-        lbl_ipAdd.setText("IP Address");
-        lbl_port.setText("Port Number");
+        lbl_serverHost.setText("Server IP / Host");
+        lbl_port.setText("Listen Port");
 
         btn_login.setText("Login");
         btn_login.addActionListener(this::btn_loginActionPerformed);
+
+        btn_logout.setText("Logout");
+        btn_logout.addActionListener(this::btn_logoutActionPerformed);
 
         lbl_to.setText("To:");
 
@@ -64,7 +127,7 @@ public class Chatroom extends javax.swing.JFrame {
         jComboBox1.addActionListener(this::jComboBox1ActionPerformed);
 
         jTextArea1.setColumns(20);
-        jTextArea1.setRows(5);
+        jTextArea1.setRows(20);
         jScrollPane1.setViewportView(jTextArea1);
 
         btn_send.setText("Send");
@@ -75,7 +138,7 @@ public class Chatroom extends javax.swing.JFrame {
 
         layout.setHorizontalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                .addComponent(jSeparator1, javax.swing.GroupLayout.Alignment.TRAILING)
+                .addComponent(jSeparator1)
                 .addGroup(layout.createSequentialGroup()
                     .addContainerGap()
                     .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -85,41 +148,36 @@ public class Chatroom extends javax.swing.JFrame {
                             .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                             .addComponent(btn_send))
                         .addGroup(layout.createSequentialGroup()
-                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                .addGroup(layout.createSequentialGroup()
-                                    .addComponent(lbl_to)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(jComboBox1,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE,
-                                            javax.swing.GroupLayout.DEFAULT_SIZE,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE))
-                                .addGroup(layout.createSequentialGroup()
-                                    .addComponent(lbl_usrName)
-                                    .addGap(12, 12, 12)
-                                    .addComponent(txt_usrName,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE, 95,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(lbl_pass)
-                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                    .addComponent(txt_pass,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE, 95,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(lbl_ipAdd)
-                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                    .addComponent(txt_ipAdd,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE, 95,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(lbl_port)
-                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                    .addComponent(txt_port,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE, 95,
-                                            javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addGap(18, 18, 18)
-                                    .addComponent(btn_login)))
-                            .addGap(0, 20, Short.MAX_VALUE)))
+                            .addComponent(lbl_to)
+                            .addGap(12, 12, 12)
+                            .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, 100,
+                                    javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGap(0, 0, Short.MAX_VALUE))
+                        .addGroup(layout.createSequentialGroup()
+                            .addComponent(lbl_usrName)
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addComponent(txt_usrName, javax.swing.GroupLayout.PREFERRED_SIZE, 90,
+                                    javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGap(18, 18, 18)
+                            .addComponent(lbl_pass)
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addComponent(txt_pass, javax.swing.GroupLayout.PREFERRED_SIZE, 90,
+                                    javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGap(18, 18, 18)
+                            .addComponent(lbl_serverHost)
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addComponent(txt_serverHost, javax.swing.GroupLayout.PREFERRED_SIZE, 120,
+                                    javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGap(18, 18, 18)
+                            .addComponent(lbl_port)
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addComponent(txt_port, javax.swing.GroupLayout.PREFERRED_SIZE, 80,
+                                    javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGap(18, 18, 18)
+                            .addComponent(btn_login)
+                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                            .addComponent(btn_logout)
+                            .addGap(0, 0, Short.MAX_VALUE)))
                     .addContainerGap())
         );
 
@@ -136,15 +194,16 @@ public class Chatroom extends javax.swing.JFrame {
                         .addComponent(txt_pass, javax.swing.GroupLayout.PREFERRED_SIZE,
                                 javax.swing.GroupLayout.DEFAULT_SIZE,
                                 javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(lbl_ipAdd)
-                        .addComponent(txt_ipAdd, javax.swing.GroupLayout.PREFERRED_SIZE,
+                        .addComponent(lbl_serverHost)
+                        .addComponent(txt_serverHost, javax.swing.GroupLayout.PREFERRED_SIZE,
                                 javax.swing.GroupLayout.DEFAULT_SIZE,
                                 javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addComponent(lbl_port)
                         .addComponent(txt_port, javax.swing.GroupLayout.PREFERRED_SIZE,
                                 javax.swing.GroupLayout.DEFAULT_SIZE,
                                 javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(btn_login))
+                        .addComponent(btn_login)
+                        .addComponent(btn_logout))
                     .addGap(18, 18, 18)
                     .addComponent(jSeparator1, javax.swing.GroupLayout.PREFERRED_SIZE, 10,
                             javax.swing.GroupLayout.PREFERRED_SIZE)
@@ -155,7 +214,7 @@ public class Chatroom extends javax.swing.JFrame {
                                 javax.swing.GroupLayout.DEFAULT_SIZE,
                                 javax.swing.GroupLayout.PREFERRED_SIZE))
                     .addGap(18, 18, 18)
-                    .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 500, Short.MAX_VALUE)
+                    .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 420, Short.MAX_VALUE)
                     .addGap(18, 18, 18)
                     .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                         .addComponent(txt_msg, javax.swing.GroupLayout.PREFERRED_SIZE,
@@ -168,7 +227,10 @@ public class Chatroom extends javax.swing.JFrame {
         pack();
     }
 
-    private void btn_loginActionPerformed(java.awt.event.ActionEvent evt) {
+    /**
+     * Handles login button press.
+     */
+    private void btn_loginActionPerformed(ActionEvent evt) {
         if (auth) {
             JOptionPane.showMessageDialog(this, "Already logged in.");
             return;
@@ -176,31 +238,32 @@ public class Chatroom extends javax.swing.JFrame {
 
         String username = txt_usrName.getText().trim();
         String password = txt_pass.getText().trim();
-        String ip = txt_ipAdd.getText().trim();
+        serverHost = txt_serverHost.getText().trim();
         String portText = txt_port.getText().trim();
 
-        if (username.isEmpty() || password.isEmpty() || ip.isEmpty() || portText.isEmpty()) {
+        if (username.isEmpty() || password.isEmpty() || serverHost.isEmpty() || portText.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Fill in all login fields.");
             return;
         }
 
-        int port;
+        int listenPort;
         try {
-            port = Integer.parseInt(portText);
+            listenPort = Integer.parseInt(portText);
         } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this, "Port must be a number.");
+            JOptionPane.showMessageDialog(this, "Listen port must be a number.");
             return;
         }
 
+        // Step 1: authenticate with AuthenticationServer
         try (
-            Socket authSocket = new Socket(ip, 9999);
+            Socket authSocket = new Socket(serverHost, 9999);
             InputStream inStream = authSocket.getInputStream();
             OutputStream outStream = authSocket.getOutputStream();
             Scanner in = new Scanner(inStream);
             PrintWriter out = new PrintWriter(outStream, true)
         ) {
             if (in.hasNextLine()) {
-                System.out.println(in.nextLine().trim());
+                in.nextLine(); // "Connected"
             }
 
             out.println(username + "~" + password);
@@ -214,30 +277,36 @@ public class Chatroom extends javax.swing.JFrame {
 
             if (!"Authenticated!".equals(response)) {
                 JOptionPane.showMessageDialog(
-                        this,
-                        "Either username or password is incorrect.",
-                        "ERROR",
-                        JOptionPane.WARNING_MESSAGE
+                    this,
+                    "Either username or password is incorrect.",
+                    "ERROR",
+                    JOptionPane.WARNING_MESSAGE
                 );
                 return;
             }
 
-            currentUser = new Person(username, password, ip, port);
+            // Step 2: create current user
+            // IP is not needed here because the server learns it during registration
+            currentUser = new Person(username, password, "", listenPort);
 
+            // Step 3: start local listening socket before registration
             startMessageListener();
 
+            // Step 4: register with DatabaseServer
             boolean registered = registerWithDatabaseServer(currentUser);
+
             if (!registered) {
-                JOptionPane.showMessageDialog(this, "Login succeeded, but registration with chat server failed.");
+                JOptionPane.showMessageDialog(this, "Login succeeded, but chat registration failed.");
+                stopListener();
+                currentUser = null;
                 return;
             }
 
             auth = true;
             selectedReceiver = new Person(jComboBox1.getSelectedItem().toString());
 
-            jTextArea1.append("Logged in as " + currentUser.getUsername()
-                    + " on " + currentUser.getIpAddress()
-                    + ":" + currentUser.getPortNumber() + "\n");
+            appendSystemMessage("Logged in as " + currentUser.getUsername()
+                    + " on listen port " + currentUser.getPortNumber());
 
             JOptionPane.showMessageDialog(this, "Login successful.");
 
@@ -247,26 +316,30 @@ public class Chatroom extends javax.swing.JFrame {
         }
     }
 
+    /**
+     * Registers the client with DatabaseServer.
+     *
+     * The server will infer the client's IP from the socket connection.
+     */
     private boolean registerWithDatabaseServer(Person p) {
         try (
-            Socket socket = new Socket("localhost", 9998);
+            Socket socket = new Socket(serverHost, 9998);
             InputStream inStream = socket.getInputStream();
             OutputStream outStream = socket.getOutputStream();
             Scanner in = new Scanner(inStream);
             PrintWriter out = new PrintWriter(outStream, true)
         ) {
             if (in.hasNextLine()) {
-                System.out.println(in.nextLine().trim());
+                in.nextLine(); // "Connected"
             }
 
-            out.println("REGISTER~" + p.getUsername() + "~" + p.getIpAddress() + "~" + p.getPortNumber());
+            // Only send username and listen port
+            out.println("REGISTER~" + p.getUsername() + "~" + p.getPortNumber());
 
             if (in.hasNextLine()) {
                 String response = in.nextLine().trim();
-                System.out.println("Register response: " + response);
                 return "Registered".equals(response);
             }
-
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -274,7 +347,10 @@ public class Chatroom extends javax.swing.JFrame {
         return false;
     }
 
-    private void btn_sendActionPerformed(java.awt.event.ActionEvent evt) {
+    /**
+     * Handles send button press or Enter key in the message field.
+     */
+    private void btn_sendActionPerformed(ActionEvent evt) {
         if (!auth || currentUser == null) {
             JOptionPane.showMessageDialog(this, "Please log in first.");
             return;
@@ -287,15 +363,21 @@ public class Chatroom extends javax.swing.JFrame {
             return;
         }
 
+        // Optional: prevent sending to yourself
+        if (currentUser.getUsername().equals(selectedReceiver.getUsername())) {
+            JOptionPane.showMessageDialog(this, "You cannot send a message to yourself.");
+            return;
+        }
+
         try (
-            Socket socket = new Socket("localhost", 9998);
+            Socket socket = new Socket(serverHost, 9998);
             InputStream inStream = socket.getInputStream();
             OutputStream outStream = socket.getOutputStream();
             Scanner in = new Scanner(inStream);
             PrintWriter out = new PrintWriter(outStream, true)
         ) {
             if (in.hasNextLine()) {
-                System.out.println(in.nextLine().trim());
+                in.nextLine(); // "Connected"
             }
 
             out.println("MESSAGE~" + currentUser.getUsername()
@@ -305,14 +387,17 @@ public class Chatroom extends javax.swing.JFrame {
             String response = "";
             if (in.hasNextLine()) {
                 response = in.nextLine().trim();
-                System.out.println("Message response: " + response);
             }
 
             if ("Sent".equals(response)) {
-                jTextArea1.append("Me -> " + selectedReceiver.getUsername() + ": " + messageText + "\n");
+                appendChatLine("Me", selectedReceiver.getUsername(), messageText);
                 txt_msg.setText("");
             } else if ("ReceiverOffline".equals(response)) {
-                JOptionPane.showMessageDialog(this, selectedReceiver.getUsername() + " is not logged in.");
+                JOptionPane.showMessageDialog(this,
+                        selectedReceiver.getUsername() + " is not logged in.");
+            } else if ("DeliveryFailed".equals(response)) {
+                JOptionPane.showMessageDialog(this,
+                        "Message could not be delivered. Check the receiver's firewall/listen port.");
             } else {
                 JOptionPane.showMessageDialog(this, "Message could not be sent.");
             }
@@ -323,18 +408,30 @@ public class Chatroom extends javax.swing.JFrame {
         }
     }
 
-    private void jComboBox1ActionPerformed(java.awt.event.ActionEvent evt) {
+    /**
+     * Updates the selected receiver when the combo box changes.
+     */
+    private void jComboBox1ActionPerformed(ActionEvent evt) {
         selectedReceiver = new Person(jComboBox1.getSelectedItem().toString());
     }
 
+    /**
+     * Handles logout button press.
+     */
+    private void btn_logoutActionPerformed(ActionEvent evt) {
+        cleanupAndLogout();
+        JOptionPane.showMessageDialog(this, "Logged out.");
+    }
+
+    /**
+     * Starts the background thread that listens for incoming chat messages.
+     */
     private void startMessageListener() throws Exception {
         listenerSocket = new ServerSocket(currentUser.getPortNumber());
 
         listenerThread = new Thread(() -> {
             try {
-                System.out.println("Listening on port " + currentUser.getPortNumber());
-
-                while (true) {
+                while (!Thread.currentThread().isInterrupted()) {
                     Socket incoming = listenerSocket.accept();
 
                     try (
@@ -343,6 +440,8 @@ public class Chatroom extends javax.swing.JFrame {
                     ) {
                         while (in.hasNextLine()) {
                             String line = in.nextLine().trim();
+
+                            // Expected format: sender~receiver~message
                             String[] parts = line.split("~", 3);
 
                             if (parts.length == 3) {
@@ -351,7 +450,7 @@ public class Chatroom extends javax.swing.JFrame {
                                 String msg = parts[2];
 
                                 SwingUtilities.invokeLater(() ->
-                                    jTextArea1.append(sender + " -> " + receiver + ": " + msg + "\n")
+                                    appendChatLine(sender, receiver, msg)
                                 );
                             }
                         }
@@ -359,14 +458,83 @@ public class Chatroom extends javax.swing.JFrame {
                         e.printStackTrace();
                     }
                 }
-
             } catch (Exception e) {
-                e.printStackTrace();
+                // Ignore errors caused by normal socket close during logout/shutdown
+                if (listenerSocket != null && !listenerSocket.isClosed()) {
+                    e.printStackTrace();
+                }
             }
         });
 
         listenerThread.setDaemon(true);
         listenerThread.start();
+    }
+
+    /**
+     * Stops the local message listener.
+     */
+    private void stopListener() {
+        try {
+            if (listenerSocket != null && !listenerSocket.isClosed()) {
+                listenerSocket.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        if (listenerThread != null) {
+            listenerThread.interrupt();
+        }
+    }
+
+    /**
+     * Sends a logout request to DatabaseServer and resets local state.
+     */
+    private void cleanupAndLogout() {
+        if (auth && currentUser != null) {
+            try (
+                Socket socket = new Socket(serverHost, 9998);
+                InputStream inStream = socket.getInputStream();
+                OutputStream outStream = socket.getOutputStream();
+                Scanner in = new Scanner(inStream);
+                PrintWriter out = new PrintWriter(outStream, true)
+            ) {
+                if (in.hasNextLine()) {
+                    in.nextLine(); // "Connected"
+                }
+
+                out.println("LOGOUT~" + currentUser.getUsername());
+
+                if (in.hasNextLine()) {
+                    System.out.println(in.nextLine().trim());
+                }
+            } catch (Exception e) {
+                // Not fatal if logout cannot be sent
+                e.printStackTrace();
+            }
+        }
+
+        stopListener();
+
+        auth = false;
+        currentUser = null;
+        selectedReceiver = null;
+    }
+
+    /**
+     * Appends a system/status line to the chat area.
+     */
+    private void appendSystemMessage(String text) {
+        String timestamp = LocalTime.now().format(timeFormatter);
+        jTextArea1.append("[" + timestamp + "] " + text + "\n");
+    }
+
+    /**
+     * Appends a chat message line to the chat area.
+     */
+    private void appendChatLine(String sender, String receiver, String msg) {
+        String timestamp = LocalTime.now().format(timeFormatter);
+        jTextArea1.append("[" + timestamp + "] " + sender + " -> " + receiver + ": " + msg + "\n");
     }
 
     public static void main(String args[]) {
@@ -385,20 +553,22 @@ public class Chatroom extends javax.swing.JFrame {
         java.awt.EventQueue.invokeLater(() -> new Chatroom().setVisible(true));
     }
 
+    // Swing components
     private javax.swing.JButton btn_login;
+    private javax.swing.JButton btn_logout;
     private javax.swing.JButton btn_send;
     private javax.swing.JComboBox<String> jComboBox1;
     private javax.swing.JLabel lbl_pass;
-    private javax.swing.JLabel lbl_ipAdd;
     private javax.swing.JLabel lbl_port;
+    private javax.swing.JLabel lbl_serverHost;
     private javax.swing.JLabel lbl_to;
+    private javax.swing.JLabel lbl_usrName;
     private javax.swing.JScrollPane jScrollPane1;
     private javax.swing.JSeparator jSeparator1;
     private javax.swing.JTextArea jTextArea1;
-    private javax.swing.JTextField txt_usrName;
-    private javax.swing.JTextField txt_pass;
-    private javax.swing.JTextField txt_ipAdd;
-    private javax.swing.JTextField txt_port;
     private javax.swing.JTextField txt_msg;
-    private javax.swing.JLabel lbl_usrName;
+    private javax.swing.JTextField txt_pass;
+    private javax.swing.JTextField txt_port;
+    private javax.swing.JTextField txt_serverHost;
+    private javax.swing.JTextField txt_usrName;
 }

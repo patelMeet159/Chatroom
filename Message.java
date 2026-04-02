@@ -1,3 +1,8 @@
+/**
+ * Message
+ *
+ * Represents a chat message between two users.
+ */
 public class Message {
     private String message;
     private Person sender;
