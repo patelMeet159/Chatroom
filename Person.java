@@ -1,5 +1,8 @@
-//Name = Meet Patel
-
+/**
+ * Person
+ *
+ * Represents a chat user.
+ */
 public class Person {
     private String userName;
     private String password;
