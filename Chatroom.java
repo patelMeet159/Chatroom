@@ -406,6 +406,9 @@ public class Chatroom extends javax.swing.JFrame {
 
             System.out.println("Sending: " + sendCommand);
             out.println(sendCommand);
+            // Millisecond timestamp printed immediately after successful send
+                logMillis("SENT", currentUser.getUsername() + " -> "
+                        + selectedReceiver.getUsername() + " : " + messageText);
 
             String response = "";
             if (in.hasNextLine()) {
@@ -414,9 +417,7 @@ public class Chatroom extends javax.swing.JFrame {
             }
 
             if ("Sent".equals(response)) {
-                // Millisecond timestamp printed immediately after successful send
-                logMillis("SENT", currentUser.getUsername() + " -> "
-                        + selectedReceiver.getUsername() + " : " + messageText);
+                
 
                 appendChatLine("Me", selectedReceiver.getUsername(), messageText);
                 txt_msg.setText("");
@@ -478,12 +479,13 @@ public class Chatroom extends javax.swing.JFrame {
                                 String receiver = parts[1];
                                 String msg = parts[2];
 
-                                // Millisecond timestamp printed immediately after receive
-                                logMillis("RECEIVED", sender + " -> " + receiver + " : " + msg);
+                                
 
                                 SwingUtilities.invokeLater(() ->
                                     appendChatLine(sender, receiver, msg)
                                 );
+                                // Millisecond timestamp printed immediately after receive
+                                logMillis("RECEIVED", sender + " -> " + receiver + " : " + msg);
                             }
                         }
                     } catch (Exception e) {
