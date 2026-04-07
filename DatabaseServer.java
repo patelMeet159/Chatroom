@@ -1,5 +1,3 @@
-//Name = Meet Patel
-
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
@@ -8,6 +6,23 @@ import java.net.Socket;
 import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * DatabaseServer
+ *
+ * Responsibilities:
+ * - Track currently online users
+ * - Learn each client's IP from socket.getInetAddress()
+ * - Store each client's listening port
+ * - Relay secure protocol messages between users
+ *
+ * Port:
+ * - 9998
+ *
+ * Supported commands:
+ * - REGISTER~username~listenPort
+ * - LOGOUT~username
+ * - Otherwise: a Message wire-format record
+ */
 public class DatabaseServer {
 
     private final ConcurrentHashMap<String, Person> activeUsers = new ConcurrentHashMap<>();
@@ -33,6 +48,8 @@ public class DatabaseServer {
             Scanner in = new Scanner(inStream);
             PrintWriter out = new PrintWriter(outStream, true)
         ) {
+            System.out.println("Connection received from: " + socket.getInetAddress().getHostAddress());
+
             out.println("Connected");
 
             if (!in.hasNextLine()) {
@@ -40,21 +57,14 @@ public class DatabaseServer {
             }
 
             String line = in.nextLine().trim();
-            String[] parts = line.split("~", 5);
+            System.out.println("Received line: " + line);
 
-            if (parts.length == 0) {
-                out.println("Error");
-                return;
-            }
-
-            String command = parts[0];
-
-            if ("REGISTER".equalsIgnoreCase(command)) {
-                handleRegister(parts, out);
-            } else if ("MESSAGE".equalsIgnoreCase(command)) {
-                handleMessage(parts, out);
+            if (line.startsWith("REGISTER~")) {
+                handleRegister(line, socket, out);
+            } else if (line.startsWith("LOGOUT~")) {
+                handleLogout(line, out);
             } else {
-                out.println("UnknownCommand");
+                handleProtocolMessage(line, out);
             }
 
         } catch (Exception e) {
@@ -62,80 +72,102 @@ public class DatabaseServer {
         }
     }
 
-    private void handleRegister(String[] parts, PrintWriter out) {
-        if (parts.length != 4) {
+    private void handleRegister(String line, Socket socket, PrintWriter out) {
+        String[] parts = line.split("~", 3);
+
+        if (parts.length != 3) {
             out.println("RegisterError");
             return;
         }
 
         String username = parts[1];
-        String ip = parts[2];
-        int port;
+        int listenPort;
 
         try {
-            port = Integer.parseInt(parts[3]);
+            listenPort = Integer.parseInt(parts[2]);
         } catch (NumberFormatException e) {
             out.println("RegisterError");
             return;
         }
 
-        Person p = new Person(username, "", ip, port);
+        String clientIp = socket.getInetAddress().getHostAddress();
+
+        Person p = new Person(username, "", clientIp, listenPort);
         activeUsers.put(username, p);
 
-        System.out.println("Registered: " + username + " at " + ip + ":" + port);
+        System.out.println("Registered: " + username + " at " + clientIp + ":" + listenPort);
+        System.out.println("Active users: " + activeUsers.keySet());
+
         out.println("Registered");
     }
 
-    private void handleMessage(String[] parts, PrintWriter out) {
-        if (parts.length != 4) {
+    private void handleLogout(String line, PrintWriter out) {
+        String[] parts = line.split("~", 2);
+
+        if (parts.length != 2) {
+            out.println("LogoutError");
+            return;
+        }
+
+        String username = parts[1];
+        activeUsers.remove(username);
+
+        System.out.println("Logged out: " + username);
+        System.out.println("Active users: " + activeUsers.keySet());
+
+        out.println("LoggedOut");
+    }
+
+    /**
+     * Routes a secure protocol message to the intended receiver.
+     */
+    private void handleProtocolMessage(String line, PrintWriter out) {
+        try {
+            Message msg = Message.fromWireString(line);
+
+            if (msg == null) {
+                out.println("MessageError");
+                return;
+            }
+
+            Person receiver = activeUsers.get(msg.getReceiver());
+
+            if (receiver == null) {
+                out.println("ReceiverOffline");
+                return;
+            }
+
+            boolean sent = forwardMessage(receiver, line);
+
+            if (sent) {
+                out.println("Sent");
+            } else {
+                out.println("DeliveryFailed");
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
             out.println("MessageError");
-            return;
-        }
-
-        String senderName = parts[1];
-        String receiverName = parts[2];
-        String text = parts[3];
-
-        Person sender = activeUsers.get(senderName);
-        Person receiver = activeUsers.get(receiverName);
-
-        
-
-        if (sender == null) {
-            out.println("SenderNotRegistered");
-            return;
-        }
-
-        if (receiver == null) {
-            out.println("ReceiverOffline");
-            return;
-        }
-
-        Message message = new Message(sender, receiver, text);
-
-        if (sendMessage(message)) {
-            out.println("Sent");
-        } else {
-            out.println("DeliveryFailed");
         }
     }
 
-    public boolean sendMessage(Message m) {
+    /**
+     * Forwards the raw protocol line to the receiver's listening socket.
+     */
+    private boolean forwardMessage(Person receiver, String wireLine) {
         try (
-            Socket socket = new Socket(m.getReceiver().getIpAddress(), m.getReceiver().getPortNumber());
+            Socket socket = new Socket(receiver.getIpAddress(), receiver.getPortNumber());
             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)
         ) {
-            out.println(m.getSender().getUsername() + "~"
-                    + m.getReceiver().getUsername() + "~"
-                    + m.getMessage());
+            out.println(wireLine);
 
-            System.out.println("Delivered: " + m.getSender().getUsername()
-                    + " -> " + m.getReceiver().getUsername()
-                    + " : " + m.getMessage());
+            System.out.println("Forwarded to " + receiver.getUsername() +
+                    " at " + receiver.getIpAddress() + ":" + receiver.getPortNumber());
+
             return true;
-
         } catch (Exception e) {
-            System.out.println("Could not deliver to " + m.getReceiver().getUsername());
+            System.out.println("Could not deliver to " + receiver.getUsername() +
+                    " at " + receiver.getIpAddress() + ":" + receiver.getPortNumber());
             e.printStackTrace();
             return false;
         }

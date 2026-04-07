@@ -1,5 +1,3 @@
-//Name = Meet Patel
-
 public class Person {
     private String userName;
     private String password;
