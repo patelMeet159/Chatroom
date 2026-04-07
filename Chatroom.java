@@ -406,7 +406,7 @@ public class Chatroom extends javax.swing.JFrame {
 
             System.out.println("Sending: " + sendCommand);
             out.println(sendCommand);
-            // Millisecond timestamp printed immediately after successful send
+            // Millisecond timestamp printed immediately after send
                 logMillis("SENT", currentUser.getUsername() + " -> "
                         + selectedReceiver.getUsername() + " : " + messageText);
 
